@@ -3,7 +3,6 @@ import math
 import typing as t
 from enum import IntEnum
 
-from hello64.clock import Clock
 from hello64.dump import CPUDump
 from hello64.memory import Memory
 
@@ -35,9 +34,8 @@ class CPU:
     BRK_IRQ_VECTOR = 0xfffe
     STACK_ADDR = 0x0100
 
-    def __init__(self, memory: Memory, clock: Clock) -> None:
+    def __init__(self, memory: Memory) -> None:
         self.mem = memory
-        self.clock = clock
         # Registers
         self.acc = 0
         self.idx = 0
@@ -226,7 +224,7 @@ class CPU:
         self.sr_v = bool(v & 0x40)
         self.sr_n = bool(v & 0x80)
 
-    def dump(self) -> CPUDump:
+    def dump(self, cycles: int) -> CPUDump:
         status = "".join([
             "N" if self.sr_n else "n",
             "V" if self.sr_v else "v",
@@ -244,13 +242,14 @@ class CPU:
             idy=self.idy,
             ins=self.ins,
             status=status,
-            cycles=self.clock.cycle_counter,
+            cycles=cycles,
         )
 
     def reset(self, *, extended=False):
-        """ This is the main entry point.
-            Reset the CPU and load the instruction at the `RESET_VECTOR`.
+        """ Reset the CPU set PC to `RESET_VECTOR`.
             According to the specification only PC and SP are initialized.
+
+            The 8 cycles this operation normally takes are simply ignored.
 
             See https://www.pagetable.com/?p=410 for a very detailed description
             of what's happening.
@@ -266,25 +265,26 @@ class CPU:
             self.acc = self.idx = self.idy = 0
             self.sr_c = self.sr_z = self.sr_i = self.sr_d = False
             self.sr_d = self.sr_b = self.sr_v = self.sr_n = False
-        self.clock.schedule(self.step)
 
-    def step(self):
-        """ Execute the instruction found in SI.
+    def start(self) -> t.Iterator[t.Literal["busy", "idle"]]:
+        """ Start the main loop. After each cycle the current state is emitted.
+            Use the returned generator to control the cycle-accurate execution of
+            instructions.
         """
-        # Read instruction
-        debug_pc = self.pc
-        self.ins = self.mem.read(self.pc)
-        self._inc_pc()
-        yield "busy"
-        assert self.ins in self.opcodes, f"Unknow opcode: {self.ins:02x}"
-        code, addr_mode = self.opcodes[self.ins]
-        code_args = addr_mode()
-        if logger.isEnabledFor(logging.DEBUG):
-            addr_str = "" if code_args[
-                0] == "implied" else " A " if code_args[0] == "A" else f" {code_args[0]:04x} "
-            logger.debug(f"PC {debug_pc:04x}: {code.__name__.upper()}{addr_str}({self.ins:02x})")
-        yield from code(*code_args)
-        self.clock.schedule(self.step)
+        while True:
+            # Read instruction
+            debug_pc = self.pc
+            self.ins = self.mem.read(self.pc)
+            self._inc_pc()
+            yield "busy"
+            assert self.ins in self.opcodes, f"Unknow opcode: {self.ins:02x}"
+            code, addr_mode = self.opcodes[self.ins]
+            addr, m = addr_mode()
+            if logger.isEnabledFor(logging.DEBUG):
+                addr_str = "" if addr == "implied" else " A " if addr == "A" else f" {addr:04x} "
+                logger.debug(
+                    f"PC {debug_pc:04x}: {code.__name__.upper()}{addr_str}({self.ins:02x})")
+            yield from code(addr, m)  # type: ignore
 
     def addr_implied(self):
         return "implied", AddrMode.implied
@@ -374,21 +374,21 @@ class CPU:
 
     def asl(self, addr: AddrOrACC, m: AddrMode):
         yield from self._mem_access_timing2(m)
-        v = self._read(addr)
+        v = self._read_with_acc(addr)
         self.sr_c = bool(v & 0x80)
         v = (v << 1) % 0x100
         self.sr_z = v == 0
         self.sr_n = bool(v & 0x80)
-        self._write(addr, v)
+        self._write_with_acc(addr, v)
         yield "idle"
 
-    def bcc(self, addr: int, m: AddrMode):
+    def bcc(self, addr: int, *_):
         yield from self._jump_relative(not self.sr_c, addr)
 
-    def bcs(self, addr: int, m: AddrMode):
+    def bcs(self, addr: int, *_):
         yield from self._jump_relative(self.sr_c, addr)
 
-    def beq(self, addr: int, m: AddrMode):
+    def beq(self, addr: int, *_):
         yield from self._jump_relative(self.sr_z, addr)
 
     def bit(self, addr: int, m: AddrMode):
@@ -399,16 +399,16 @@ class CPU:
         self.sr_z = bool(v & self.acc == 0)
         yield "idle"
 
-    def bmi(self, addr: int, m: AddrMode):
+    def bmi(self, addr: int, *_):
         yield from self._jump_relative(self.sr_n, addr)
 
-    def bne(self, addr: int, m: AddrMode):
+    def bne(self, addr: int, *_):
         yield from self._jump_relative(not self.sr_z, addr)
 
-    def bpl(self, addr: int, m: AddrMode):
+    def bpl(self, addr: int, *_):
         yield from self._jump_relative(not self.sr_n, addr)
 
-    def brk(self, addr: int, m: AddrMode):
+    def brk(self, *_):
         yield from ["busy"] * 5
         self._inc_pc()
         self._push_stack(self.pc >> 8)
@@ -419,25 +419,25 @@ class CPU:
         self.pc = self._read(self.BRK_IRQ_VECTOR) + (self._read(self.BRK_IRQ_VECTOR + 1) << 8)
         yield "idle"
 
-    def bvc(self, addr: int, m: AddrMode):
+    def bvc(self, addr: int, *_):
         yield from self._jump_relative(not self.sr_v, addr)
 
-    def bvs(self, addr: int, m: AddrMode):
+    def bvs(self, addr: int, *_):
         yield from self._jump_relative(self.sr_v, addr)
 
-    def clc(self, addr: int, m: AddrMode):
+    def clc(self, *_):
         self.sr_c = False
         yield "idle"
 
-    def cld(self, *args):
+    def cld(self, *_):
         self.sr_d = False
         yield "idle"
 
-    def cli(self, addr: int, m: AddrMode):
+    def cli(self, *_):
         self.sr_i = False
         yield "idle"
 
-    def clv(self, addr: int, m: AddrMode):
+    def clv(self, *_):
         self.sr_v = False
         yield "idle"
 
@@ -482,7 +482,7 @@ class CPU:
         self._write(addr, v)
         yield "idle"
 
-    def dex(self, addr: int, m: AddrMode):
+    def dex(self, *_):
         v = (self.idx - 1)
         if v < 0:
             v += 0x100
@@ -491,7 +491,7 @@ class CPU:
         self.idx = v
         yield "idle"
 
-    def dey(self, addr: int, m: AddrMode):
+    def dey(self, *_):
         v = (self.idy - 1)
         if v < 0:
             v += 0x100
@@ -516,14 +516,14 @@ class CPU:
         self._write(addr, v)
         yield "idle"
 
-    def inx(self, addr: int, m: AddrMode):
+    def inx(self, *_):
         v = (self.idx + 1) % 0x100
         self.sr_z = v == 0
         self.sr_n = bool(v & 0x80)
         self.idx = v
         yield "idle"
 
-    def iny(self, addr: int, m: AddrMode):
+    def iny(self, *_):
         v = (self.idy + 1) % 0x100
         self.sr_z = v == 0
         self.sr_n = bool(v & 0x80)
@@ -538,7 +538,7 @@ class CPU:
         self.pc = addr
         yield "idle"
 
-    def jsr(self, addr: int, m: AddrMode):
+    def jsr(self, addr: int, *_):
         yield from ["busy"] * 4
         self._inc_pc(-1)
         self._push_stack(self.pc >> 8)
@@ -572,15 +572,15 @@ class CPU:
 
     def lsr(self, addr: AddrOrACC, m: AddrMode):
         yield from self._mem_access_timing2(m)
-        v = self._read(addr)
+        v = self._read_with_acc(addr)
         self.sr_c = bool(v & 0x01)
         v = v >> 1
         self.sr_n = bool(v & 0x80)
         self.sr_z = not v
-        self._write(addr, v)
+        self._write_with_acc(addr, v)
         yield "idle"
 
-    def nop(self, addr: int, m: AddrMode):
+    def nop(self, *_):
         yield "idle"
 
     def ora(self, addr: int, m: AddrMode):
@@ -591,19 +591,19 @@ class CPU:
         self.acc = v
         yield "idle"
 
-    def pha(self, addr: int, m: AddrMode):
+    def pha(self, *_):
         yield "busy"
         self._push_stack(self.acc)
         yield "idle"
 
-    def php(self, addr: int, m: AddrMode):
+    def php(self, *_):
         yield "busy"
         # Note: The "B" flag (bit 4) is always pushed as 1 according to specification.
         v = self.sr | 0x10
         self._push_stack(v)
         yield "idle"
 
-    def pla(self, addr: int, m: AddrMode):
+    def pla(self, *_):
         yield from ["busy"] * 2
         v = self._pull_stack()
         self.sr_n = bool(v & 0x80)
@@ -611,42 +611,42 @@ class CPU:
         self.acc = v
         yield "idle"
 
-    def plp(self, addr: int, m: AddrMode):
+    def plp(self, *_):
         yield from ["busy"] * 2
         self.sr = self._pull_stack()
         yield "idle"
 
-    def rol(self, addr: int, m: AddrMode):
+    def rol(self, addr: AddrOrACC, m: AddrMode):
         yield from self._mem_access_timing2(m)
-        v = self._read(addr) << 1
+        v = self._read_with_acc(addr) << 1
         if self.sr_c:
             v |= 0x01
         self.sr_c = v > 0xff
         v &= 0xff
         self.sr_z = v == 0
         self.sr_n = bool(v & 0x80)
-        self._write(addr, v)
+        self._write_with_acc(addr, v)
         yield "idle"
 
-    def ror(self, addr: int, m: AddrMode):
+    def ror(self, addr: AddrOrACC, m: AddrMode):
         yield from self._mem_access_timing2(m)
-        v = self._read(addr)
+        v = self._read_with_acc(addr)
         if self.sr_c:
             v |= 0x100
         self.sr_c = bool(v & 0x01)
         v = v >> 1
         self.sr_z = v == 0
         self.sr_n = bool(v & 0x80)
-        self._write(addr, v)
+        self._write_with_acc(addr, v)
         yield "idle"
 
-    def rti(self, addr: int, m: AddrMode):
+    def rti(self, *_):
         yield from ["busy"] * 4
         self.sr = self._pull_stack()
         self.pc = self._pull_stack() + (self._pull_stack() << 8)
         yield "idle"
 
-    def rts(self, addr: int, m: AddrMode):
+    def rts(self, *_):
         yield from ["busy"] * 4
         v = self._pull_stack() + (self._pull_stack() << 8)
         self.pc = v + 1
@@ -675,15 +675,15 @@ class CPU:
             self._add(src ^ 0xff)
         yield "idle"
 
-    def sec(self, addr: int, m: AddrMode):
+    def sec(self, *_):
         self.sr_c = True
         yield "idle"
 
-    def sed(self, addr: int, m: AddrMode):
+    def sed(self, *_):
         self.sr_d = True
         yield "idle"
 
-    def sei(self, addr: int, m: AddrMode):
+    def sei(self, *_):
         self.sr_i = True
         yield "idle"
 
@@ -702,39 +702,39 @@ class CPU:
         self._write(addr, self.idy)
         yield "idle"
 
-    def tax(self, addr: int, m: AddrMode):
+    def tax(self, *_):
         v = self.acc
         self.sr_n = bool(v & 0x80)
         self.sr_z = not v
         self.idx = v
         yield "idle"
 
-    def tay(self, addr: int, m: AddrMode):
+    def tay(self, *_):
         v = self.acc
         self.sr_n = bool(v & 0x80)
         self.sr_z = not v
         self.idy = v
         yield "idle"
 
-    def tsx(self, addr: int, m: AddrMode):
+    def tsx(self, *_):
         v = self.sp
         self.sr_n = bool(v & 0x80)
         self.sr_z = not v
         self.idx = v
         yield "idle"
 
-    def txa(self, addr: int, m: AddrMode):
+    def txa(self, *_):
         v = self.idx
         self.sr_n = bool(v & 0x80)
         self.sr_z = not v
         self.acc = v
         yield "idle"
 
-    def txs(self, *args):
+    def txs(self, *_):
         self.sp = self.idx
         yield "idle"
 
-    def tya(self, addr: int, m: AddrMode):
+    def tya(self, *_):
         v = self.idy
         self.sr_n = bool(v & 0x80)
         self.sr_z = not v
@@ -805,15 +805,21 @@ class CPU:
         else:
             self.sp -= 1
 
-    def _read(self, addr: AddrOrACC):
+    def _read_with_acc(self, addr: AddrOrACC):
         if addr == "A":
             return self.acc
         return self.mem.read(addr)
 
-    def _write(self, addr: AddrOrACC, v: int):
+    def _write_with_acc(self, addr: AddrOrACC, v: int):
         if addr == "A":
             self.acc = v
             return
+        self.mem.write(addr, v)
+
+    def _read(self, addr: int):
+        return self.mem.read(addr)
+
+    def _write(self, addr: int, v: int):
         self.mem.write(addr, v)
 
     def _inc_pc(self, add=1):

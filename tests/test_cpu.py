@@ -1,19 +1,17 @@
 from hello64.dump import CPUDump
 from hello64.cpu import CPU
-from hello64.clock import Clock
 from hello64.memory import Memory
 
 
-def test_reset(cpu: CPU, memory: Memory, clock: Clock):
+def test_reset(cpu: CPU, memory: Memory):
     memory.ram[0xfffc] = 0x30
     memory.ram[0xfffd] = 0x20
     memory.ram[0x2030] = 0xea
-    assert clock.cycle_counter == 0
     cpu.reset()
     assert cpu.pc == 0x2030
     assert cpu.ins == 0
     # Load first instruction.
-    next(clock.start())
+    next(cpu.start())
     assert cpu.pc == 0x2031
     assert cpu.ins == 0xea
 

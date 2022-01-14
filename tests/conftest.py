@@ -3,15 +3,9 @@ import pytest
 
 from hello64.cpu import CPU
 from hello64.memory import Memory
-from hello64.clock import Clock
 from .assembler import assemble_6502
 
 logger = logging.getLogger("test")
-
-
-@pytest.fixture
-def clock():
-    return Clock()
 
 
 @pytest.fixture
@@ -20,12 +14,12 @@ def memory():
 
 
 @pytest.fixture
-def cpu(clock: Clock, memory: Memory):
-    return CPU(memory=memory, clock=clock)
+def cpu(memory: Memory):
+    return CPU(memory=memory)
 
 
 @pytest.fixture
-def asm(cpu: CPU, clock: Clock, memory: Memory):
+def asm(cpu: CPU, memory: Memory):
     """ Compile the given assembler snippet and run it until the end of the
         compiled code is reached or the illegal opcode 0xff is seen.
 
@@ -45,14 +39,15 @@ def asm(cpu: CPU, clock: Clock, memory: Memory):
         logger.debug("\n".join(debug_mem))
         memory.ram[cpu.RESET_VECTOR] = 0x00
         memory.ram[cpu.RESET_VECTOR + 1] = 0x80
-        clock.reset()
         cpu.reset(extended=True)
-        for state in clock.start():
+        cycles = 0
+        for state in cpu.start():
+            cycles += 1
             if state == "idle" and logger.isEnabledFor(logging.DEBUG):
-                logger.debug(str(cpu.dump()))
+                logger.debug(str(cpu.dump(cycles)))
             if (cpu.pc >= end and state == "idle") or cpu.ins == 0xff:
                 break
-            assert clock.cycle_counter < 1000, "Infinite loop or illegal jump detected"
-        return cpu.dump()
+            assert cycles < 1000, "Infinite loop or illegal jump detected"
+        return cpu.dump(cycles)
 
     return assemble_and_run
