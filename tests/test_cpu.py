@@ -16,63 +16,63 @@ def test_reset(cpu: CPU, memory: Memory):
     assert cpu.ins == 0xea
 
 
-def test_lda(asm):
-    assert asm("0x8000: LDA #0x42") == CPUDump(status="nvbdizc", acc=0x42)
+def test_lda(run):
+    assert run("0x8000: LDA #0x42") == CPUDump(status="nvbdizc", acc=0x42)
 
 
-def test_lda_Z_flag(asm):
-    assert asm("0x8000: LDA #0x00") == CPUDump(status="nvbdiZc", acc=0x00)
-    assert asm("0x8000: LDA #0x80") == CPUDump(status="Nvbdizc", acc=0x80)
+def test_lda_Z_flag(run):
+    assert run("0x8000: LDA #0x00") == CPUDump(status="nvbdiZc", acc=0x00)
+    assert run("0x8000: LDA #0x80") == CPUDump(status="Nvbdizc", acc=0x80)
 
 
-def test_add(asm):
-    assert asm("""
+def test_add(run):
+    assert run("""
         0x8000: LDA #0x30
                 ADC #0x20
         """) == CPUDump(status="nvbdizc", acc=0x50)
 
 
-def test_add_with_different_sign(asm):
-    assert asm("""
+def test_add_with_different_sign(run):
+    assert run("""
         0x8000: LDA #0x30
                 ADC #0xf0
         """) == CPUDump(status="nvbdizC", acc=0x20)
 
 
-def test_add_V_flag(asm):
-    assert asm("""
+def test_add_V_flag(run):
+    assert run("""
         0x8000: LDA #0x50
                 ADC #0x50
         """) == CPUDump(status="NVbdizc", acc=0xa0)
-    assert asm("""
+    assert run("""
         0x8000: LDA #0x90
                 ADC #0x90
         """) == CPUDump(status="nVbdizC", acc=0x20)
 
 
-def test_add_Z_flag(asm):
-    assert asm("""
+def test_add_Z_flag(run):
+    assert run("""
         0x8000: LDA #0x70
                 ADC #0x90
         """) == CPUDump(status="nvbdiZC", acc=0x0)
 
 
-def test_add_N_flag(asm):
-    assert asm("""
+def test_add_N_flag(run):
+    assert run("""
         0x8000: LDA #0x60
                 ADC #0x90
         """) == CPUDump(status="Nvbdizc", acc=0xf0)
 
 
-def test_add_C_flag(asm):
-    assert asm("""
+def test_add_C_flag(run):
+    assert run("""
         0x8000: LDA #0x80
                 ADC #0x90
         """) == CPUDump(status="nVbdizC", acc=0x10)
 
 
-def test_branch_forwards(asm):
-    assert asm("""
+def test_branch_forwards(run):
+    assert run("""
         0x8000: LDA #0x80
                 BNE 0x8080
                 LDA #0x01
@@ -81,8 +81,8 @@ def test_branch_forwards(asm):
         """) == CPUDump(status="nvbdizc", acc=0x02, pc=0x8082)
 
 
-def test_branch_backwards(asm):
-    assert asm("""
+def test_branch_backwards(run):
+    assert run("""
         0x7ff0: LDA #0x02
                 DATA #0xff
         0x8000: LDA #0x80
@@ -91,8 +91,8 @@ def test_branch_backwards(asm):
         """) == CPUDump(status="nvbdizc", acc=0x02, pc=0x7ff3)
 
 
-def test_jsr_rts(asm):
-    assert asm("""
+def test_jsr_rts(run):
+    assert run("""
         0x8000: LDA #0x10
                 JSR 0x9000
                 DATA #0xff

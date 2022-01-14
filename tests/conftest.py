@@ -18,14 +18,14 @@ def cpu(memory: Memory):
     return CPU(memory=memory)
 
 
-@pytest.fixture
-def asm(cpu: CPU, memory: Memory):
+@pytest.fixture(name="run")
+def run_(cpu: CPU, memory: Memory):
     """ Compile the given assembler snippet and run it until the end of the
         compiled code is reached or the illegal opcode 0xff is seen.
 
         Entry point is at 0x8000.
     """
-    def assemble_and_run(s: str):
+    def run(s: str):
         bin = assemble_6502(s.strip().splitlines())
         end = 0
         debug_mem = []
@@ -50,4 +50,4 @@ def asm(cpu: CPU, memory: Memory):
             assert cycles < 1000, "Infinite loop or illegal jump detected"
         return cpu.dump(cycles)
 
-    return assemble_and_run
+    return run

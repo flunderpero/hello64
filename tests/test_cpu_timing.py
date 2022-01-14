@@ -108,7 +108,7 @@ def parameters():
             col += 4
 
 
-def run(op, addr_mode, asm):
+def timing(op, addr_mode, run):
     """ Generate the code to test the given `op` using the `addr_mode`.
 
         :return: the code and the number of overhead cycles.
@@ -231,11 +231,11 @@ def run(op, addr_mode, asm):
     0x8100: DATA #0xff
             """
     logger.debug(f"Code: {code}")
-    return asm(code.strip()), cycles
+    return run(code.strip()), cycles
 
 
 @pytest.mark.parametrize("op,addr_mode,expected_cycles", parameters())
-def test_timing(op, addr_mode, expected_cycles, asm):
-    res, overhead_cycles = run(op, addr_mode, asm)
+def test_timing(op, addr_mode, expected_cycles, run):
+    res, overhead_cycles = timing(op, addr_mode, run)
     cycles = res.cycles - overhead_cycles
     assert cycles == expected_cycles
