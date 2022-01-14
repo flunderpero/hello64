@@ -1,0 +1,15 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+log_cli = true
+log_cli_level = "info"
+addopts = "-s -x"
+
+[tool.pyright]
+include = ["src", "tests"]
+executionEnvironments = [
+    {root = "src"}
+]
+
+[tool.yapf]
+based_on_style = "pep8"
+column_limit = 100
