@@ -18,25 +18,33 @@ def cpu(memory: Memory):
     return CPU(memory=memory)
 
 
+@pytest.fixture(name="asm")
+def asm_(memory: Memory):
+    """ Compile the given assembler snippet and load it into memory.
+    """
+    def asm(s: str):
+        bin = assemble_6502(s.strip().splitlines())
+        end = 0
+        for line in bin:
+            _, pc, ecode = line
+            for code in ecode:
+                memory.ram[pc] = code
+                pc += 1
+                end = max(end, pc)
+        return end
+
+    return asm
+
+
 @pytest.fixture(name="run")
-def run_(cpu: CPU, memory: Memory):
+def run_(cpu: CPU, memory: Memory, asm):
     """ Compile the given assembler snippet and run it until the end of the
         compiled code is reached or the illegal opcode 0xff is seen.
 
         Entry point is at 0x8000.
     """
     def run(s: str):
-        bin = assemble_6502(s.strip().splitlines())
-        end = 0
-        debug_mem = []
-        for line in bin:
-            _, pc, ecode = line
-            for code in ecode:
-                memory.ram[pc] = code
-                debug_mem.append(f"{pc:04x} {code:02x}")
-                pc += 1
-                end = max(end, pc)
-        logger.debug("\n".join(debug_mem))
+        end = asm(s)
         memory.ram[cpu.RESET_VECTOR] = 0x00
         memory.ram[cpu.RESET_VECTOR + 1] = 0x80
         cpu.reset(extended=True)

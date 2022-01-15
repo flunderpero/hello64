@@ -28,6 +28,10 @@ class AddrMode(IntEnum):
 
 
 class CPU:
+    __slots__ = [
+        "mem", "acc", "idx", "idy", "sr_c", "sr_z", "sr_i", "sr_d", "sr_b", "sr_v", "sr_n", "pc",
+        "sp", "ins", "opcodes"
+    ]
 
     RESET_VECTOR = 0xfffc
     NMI_VECTOR = 0xfffa
